@@ -1,0 +1,420 @@
+---
+title: "STA 141A Final Project"
+output: html_document
+---
+Daocheng Zhang
+918331476
+
+
+
+**Abstract**
+
+In this project, I used in this final project was collected by Steinmetz et al(2019). At first, I explored and compared the changes in this data set. Then, I used the logistic regression model to predict the feedback type based on spike trains and the stimuli.
+
+
+
+
+**Section 1: Introduction**
+
+The data set I used in this final project was collected by Steinmetz et al(2019). In this project, we need to build a predictive model to predict the feedback type based on spike trains, left contrast, and right contrast. The impact of this analysis could be far-reaching, both for the field of neuroscience and for broader scientific and technological applications.By linking neuronal activity to specific outcomes, it becomes possible to see how different stimuli affect decision-making processes.There are mainly three parts in this project. In each part, I discussed some questions of interest. In part 1, I mainly explored the structure of this data set. I also compared the changes between trials, sessions, and mice. In part 2, I found the same pattern across sessions. In part 3, I built the predictive model.      
+
+
+
+**Section 1.2: Background**
+
+This experiment contains a total of 10 mice over 39 session, but this project will only focus on 4 mice over 18 session. In this experiment, visual stimuli were randomly presented to the mouse on two screens. Mice should make decisions according to visual stimuli. Researchers use success(1) or failure(-1) to mark their feedback type.During these trials, the neural activity in the mice's visual cortex was recorded. These recordings are available in the form of spike trains, essentially a collection of time stamps indicating when a neuron fires. The spike train data used in this project focuses on the neural activity from the onset of stimuli to 0.4 seconds post-onset.
+
+
+
+**Section 2: Exploratory analysis**
+
+Part 1
+```{r}
+suppressWarnings(library(tidyverse))
+suppressWarnings(library(knitr))
+suppressWarnings(library(dplyr))
+```
+
+
+```{r}
+session=list()
+for(i in 1:18){
+  session[[i]]=readRDS(paste('./Data/session',i,'.rds',sep=''))
+  
+}
+
+```
+
+
+
+
+```{r}
+n.session=length(session)
+# in library tidyverse
+meta <- tibble(
+  mouse_name = rep('name',n.session),
+  
+  n_brain_area = rep(0,n.session),
+  n_neurons = rep(0,n.session),
+  n_trials = rep(0,n.session),
+  success_rate = rep(0,n.session)
+)
+
+
+for(i in 1:n.session){
+  tmp = session[[i]];
+  meta[i,1]=tmp$mouse_name;
+
+  meta[i,2]=length(unique(tmp$brain_area));
+  meta[i,3]=dim(tmp$spks[[1]])[1];
+  meta[i,4]=length(tmp$feedback_type);
+  meta[i,5]=mean(tmp$feedback_type+1)/2;
+  
+  }
+```
+
+
+```{r}
+kable(meta, format = "html", table.attr = "class='table table-striped'", digits=2, caption = " Data structure across sessions (Table 1)")
+
+```
+                                
+                                  
+(i) *describe the data structures across sessions*
+
+According to the table 1 above, it shows the basic structure of this data set. There are five variables in this form. mouse_name represents the name of the mouse for specific sessions. date_exp means the date of the experiment. n_brain_area represents the unique brain area involved. n_neurons means the number of neurons. n_trials is the number of trials in each session, and success_rate is the ratio of successful trials to the total number of trials. No missing values here. 
+
+
+```{r}
+# Convert meta to a data frame
+meta_df <- data.frame(n_brain_area = meta[, 2], n_neurons = meta[, 3])
+
+# Create a new vector for colors
+colors <- c(rep("black", 3), rep("blue", 4), rep("green", 4), rep("purple", 7))
+
+# If there are more points, assign them a default color
+if(length(colors) < nrow(meta_df)){
+  colors <- c(colors, rep("gray", nrow(meta_df) - length(colors)))
+}
+
+# Add the colors to the data frame
+meta_df$color <- colors
+
+ggplot(meta_df, aes(x = n_brain_area, y = n_neurons, color = color, group = color)) +
+  geom_point() +
+  geom_line() +
+  scale_color_identity() +
+  labs(x = "Number of Brain Areas", y = "Number of Neurons", title = "(Figure 1) Scatter plot of the number of neurons vs the number of brain area")
+
+```
+
+
+(iv) *explore homogeneity and heterogeneity across sessions and mice.*
+
+Figure 1 above shows the scatter plot of the number of neurons vs the number of brain area.Each dot represents one session, and each color represents a type of mouse. Black represents Cori. Blue represents Forssmann. Green represents Hench. Purple represents Lederberg. Based on this graph, we could notice the homogeneity and heterogeneity across sessions and mice.Homogeneity: In the beginning part of this graph, the number of neurons of Cori and Forssmann both decreased as the number of brain areas increased. Heterogeneity: In the middle of this graph, the number of neurons of Lederberg has increased, but the number of has remained the same. This is different from other mice. 
+
+
+```{r}
+i.s=3 
+
+i.t=1 
+
+spk.trial = session[[i.s]]$spks[[i.t]]
+area=session[[i.s]]$brain_area
+
+spk.count=apply(spk.trial,1,sum)
+
+
+spk.average.tapply=tapply(spk.count, area, mean)
+
+
+tmp_2 <- data.frame(
+  area = area,
+  spikes = spk.count
+)
+
+spk.average.dplyr =tmp_2 %>%
+  group_by(area) %>%
+  summarize(mean= mean(spikes))
+
+
+
+```
+
+```{r}
+average_spike_area<-function(i.t,this_session){
+  spk.trial = this_session$spks[[i.t]]
+  area= this_session$brain_area
+  spk.count=apply(spk.trial,1,sum)
+  spk.average.tapply=tapply(spk.count, area, mean)
+  return(spk.average.tapply)
+  }
+
+
+average_spike_area(1,this_session = session[[i.s]])
+```
+
+
+```{r}
+n.trial=length(session[[i.s]]$feedback_type)
+n.area=length(unique(session[[i.s]]$brain_area ))
+
+
+trial.summary =matrix(nrow=n.trial,ncol= n.area+1+2+1)
+for(i.t in 1:n.trial){
+  trial.summary[i.t,]=c(average_spike_area(i.t,this_session = session[[i.s]]),
+                          session[[i.s]]$feedback_type[i.t],
+                        session[[i.s]]$contrast_left[i.t],
+                        session[[i.s]]$contrast_right[i.s],
+                        i.t)
+}
+
+colnames(trial.summary)=c(names(average_spike_area(i.t,this_session = session[[i.s]])), 'feedback', 'left contr.','right contr.','id' )
+
+# Turning it into a data frame
+trial.summary <- as_tibble(trial.summary)
+```
+
+
+
+```{r}
+area.col=rainbow(n=n.area,alpha=0.7)
+plot(x=1,y=0, col='white',xlim=c(0,n.trial),ylim=c(0.5,6), xlab="Trials",ylab="Average spike counts", main=paste("(Figure 2) Spikes per area in Session", i.s))
+
+
+for(i in 1:n.area){
+  lines(y=trial.summary[[i]],x=trial.summary$id,col=area.col[i],lty=2,lwd=1)
+  lines(smooth.spline(trial.summary$id, trial.summary[[i]]),col=area.col[i],lwd=3)
+  }
+legend("topright", 
+  legend = colnames(trial.summary)[1:n.area], 
+  col = area.col, 
+  lty = 1, 
+  cex = 0.8
+)
+```
+
+
+(ii) *explore the neural activities during each trial.*
+
+The figure 2 is the average spike count across trials in session 3. I chose session 3 because it contains many brain areas. From the figure 2, we could notice that the average spike counts of SPF and LP change constantly between trials, while average spike counts of other brain area don't have obvious change. We could define this as the neural activities during trials. 
+
+
+```{r}
+plot.trial<-function(i.t,area, area.col,this_session){
+    
+    spks=this_session$spks[[i.t]];
+    n.neuron=dim(spks)[1]
+    time.points=this_session$time[[i.t]]
+    
+    plot(0,0,xlim=c(min(time.points),max(time.points)),ylim=c(0,n.neuron+1),col='white', xlab='Time (s)',yaxt='n', ylab='Neuron', main=paste('Trial ',i.t, 'feedback', this_session$feedback_type[i.t] ),cex.lab=1.5)
+    for(i in 1:n.neuron){
+        i.a=which(area== this_session$brain_area[i]);
+        col.this=area.col[i.a]
+        
+        ids.spike=which(spks[i,]>0) # find out when there are spikes 
+        if( length(ids.spike)>0 ){
+            points(x=time.points[ids.spike],y=rep(i, length(ids.spike) ),pch='.',cex=2, col=col.this)
+        }
+      
+            
+    }
+    
+legend("topright", 
+  legend = area, 
+  col = area.col, 
+  pch = 16, 
+  cex = 0.8
+  )
+  }
+varname=names(trial.summary);
+area=varname[1:(length(varname)-4)]
+plot.trial(1,area, area.col,session[[i.s]])
+```
+
+```{r}
+varname=names(trial.summary);
+area=varname[1:(length(varname)-4)]
+par(mfrow=c(1,2))
+plot.trial(1,area, area.col,session[[i.s]])
+plot.trial(2,area, area.col,session[[i.s]])
+plot.trial(3,area, area.col,session[[i.s]])
+plot.trial(4,area, area.col,session[[i.s]])
+```
+
+
+(iii) *explore the changes across trials*
+
+Comparing these figures of feedback 1 of different trials, we could find the changes across trials. In every different trials, the neuron of NB is changing, while the neuron of MG and MRN is stable.   
+
+
+**Section 3: Data integration**
+
+
+part2.
+```{r}
+avg_spikes_all <- list()
+
+for (i in 1:length(session)) {
+  
+  curr_session <- session[[i]]
+  
+  avg_spikes_session <- numeric(length(curr_session$spks))
+  
+  for (j in 1:length(curr_session$spks)) {
+    
+    total_spikes <- apply(curr_session$spks[[j]], 1, sum)
+    
+    avg_spikes_session[j] <- mean(total_spikes)
+  }
+  
+  avg_spikes_all[[i]] <- avg_spikes_session
+}
+
+avg_spikes_all <- unlist(avg_spikes_all)
+
+```
+
+
+```{r}
+contrast_left_all <- unlist(lapply(session, function(x) x$contrast_left))
+contrast_right_all <- unlist(lapply(session, function(x) x$contrast_right))
+feedback_type_all <- unlist(lapply(session, function(x) x$feedback_type))
+ 
+data <- data.frame(avg_spikes_all,contrast_left_all , contrast_right_all,feedback_type_all)
+data$feedback_type_all <- ifelse(data$feedback_type_all == -1, 0, 1)
+```
+
+(i) *extracting the shared patters across sessions*
+
+In this part, I calculate the average spike counts during each trial of each session. Using this pattern, we could ignore the information about specific neurons. To be more detailed, this method is essentially extracting a pattern (average spike counts) that is common across all sessions, regardless of the individual differences in neuron counts, neuron identities, or other session-specific characteristics. So, if a similar trend or pattern is observed in this average spike count across multiple sessions, it can be considered a shared pattern. In the end, I created a data frame with all predictors and outcomes we need to build a predictive mode.  
+
+
+
+**Section 4 Predictive modeling**
+
+part3
+```{r}
+
+# Create the training and test data set
+trainData <- data[401:700,]
+testData<- data[-(701:900),]
+logistic_model <- glm(as.factor(feedback_type_all) ~ avg_spikes_all + contrast_left_all + contrast_right_all, data = trainData, family = "binomial")
+
+
+# Summarize the model
+summary(logistic_model)
+
+probabilities <- predict(logistic_model, newdata = testData, type = "response")
+
+# Convert probabilities to class labels
+
+predictions <- ifelse(probabilities > 0.5, 1, 0)
+predictions <- factor(predictions, levels = levels(factor(testData$feedback_type_all)))
+# Create confusion matrix to see the model performance
+confusion.glm = table(true = testData$feedback_type_all, predicted = predictions)
+confusion.glm
+# Compute misclassification error rate
+mis_rate<- (confusion.glm[1,2]+confusion.glm[2,1])/sum(confusion.glm)
+mis_rate
+
+```
+In this section, I chose to use the logistic regression to build my predictive model since the outcome we need to predict is the feedback type. It has two results: success(1) and failure(-1). We could use the binomial distribution in the logistic regression. Therefore, I believe that the logistic regression will give us better result.
+
+
+
+
+
+
+
+**Section 5 Prediction performance on the test sets**
+
+
+
+```{r}
+## create the new test data set
+test_session=list()
+for(i in 1:2){
+  test_session[[i]]=readRDS(paste('./Data/test',i,'.rds',sep=''))
+  
+}
+
+avg_spikes_all_test <- list()
+
+for (i in 1:length(test_session)) {
+  
+  curr_session_test <- test_session[[i]]
+  
+  avg_spikes_session_test <- numeric(length(curr_session_test$spks))
+  
+  for (j in 1:length(curr_session_test$spks)) {
+    
+    total_spikes_test <- apply(curr_session_test$spks[[j]], 1, sum)
+    
+    avg_spikes_session_test[j] <- mean(total_spikes_test)
+  }
+  
+  avg_spikes_all_test[[i]] <- avg_spikes_session_test
+}
+
+avg_spikes_all_test <- unlist(avg_spikes_all_test)
+
+contrast_left_all_test <- unlist(lapply(test_session, function(x) x$contrast_left))
+contrast_right_all_test <- unlist(lapply(test_session, function(x) x$contrast_right))
+feedback_type_all_test <- unlist(lapply(test_session, function(x) x$feedback_type))
+ 
+test_data <- data.frame(avg_spikes_all_test,contrast_left_all_test , contrast_right_all_test,feedback_type_all_test)
+test_data$feedback_type_all_test <- ifelse(test_data$feedback_type_all_test == -1, 0, 1)
+
+
+
+#still use the same model above
+logistic_model_2 <- glm(as.factor(feedback_type_all_test) ~ avg_spikes_all_test+ contrast_left_all_test+contrast_right_all_test, data = trainData, family = "binomial")
+
+
+# Summarize the model
+summary(logistic_model_2)
+
+probabilities_2 <- predict(logistic_model_2, newdata = test_data, type = "response")
+
+
+predictions_2 <- ifelse(probabilities_2 > 0.5, 1, 0)
+predictions_2 <- factor(predictions_2, levels = levels(factor(test_data$feedback_type_all_test)))
+
+# Create confusion matrix to see the model performance
+confusion.glm_2 = table(true = test_data$feedback_type_all_test, predicted = predictions_2)
+confusion.glm_2
+
+mis_rate_2<- (confusion.glm_2[1,2]+confusion.glm_2[2,1])/sum(confusion.glm_2)
+mis_rate_2
+
+```
+
+In this section, I used the test data provided by the professor. I chose to calculate the misclassification error rate because I believe that this error rate gives us the most intuitive sense of the accuracy of this model. The result shows that the error rate is 0.275. I also used the confusion matrix to show my result.
+
+
+**Section 6 Discussion**
+
+In section 4, I used the test data that I created by myself. In section 5, I used the new test data. The model gives two similar error rate. This result shows that shows that my model is stable. However, the error rate is about 0.27~0.29. Although it is not very high, it is also not a small number. This shows that my model should be improved to gain a better result. I think that there are several ways to achieve this. The first method is using the cluster in the data integration. I didn't address the differences between sessions. Using cluster, we could notice the differences by assuming some functions of groups of neurons are same across sessions. The second pattern is PCA. It has similar idea to cluster method. The last method is to try some combinations of predictors in my logistic regression model. For example: contrast_right*contrast_left or contrast_right^2. In conclusion, I used the logistic regression model to predict the outcome we need, although there are many aspects can be improved. 
+
+
+
+**Acknowledgement**
+
+Chatgpt
+
+
+```{r}
+sessionInfo()
+```
+
+
+
+
+
+
+
+
+
+
+
